@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "VeritasWeb",
+  "version": "1.0",
+
+  "description": "Ajoute une bordure rouge pleine sur l'ensemble des pages web mozilla.org.",
+
+  "browser_action": {
+    "default_icon": "icons/beasts-32-light.png",
+    "default_title": "Beastify",
+    "default_popup": "popup/page.html"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["*://*.org/*"],
+      "js": ["borderify.js"]
+    }
+  ]
+}
