@@ -1,93 +1,158 @@
-# FakeNewsProjet
+# Rapport de Projet : VeritasWeb
 
+## 1. Présentation du Projet
+**VeritasWeb** est une extension de navigateur (Firefox) conçue pour lutter contre la désinformation en temps réel. Son objectif est d'analyser le texte de la page web lue par l'utilisateur, de croiser ces informations avec une base de données de faits avérés (Fact-Checking), et de mettre en évidence visuellement les affirmations fausses ou trompeuses.
 
+Le projet repose sur l'architecture **RAG (Retrieval-Augmented Generation)**, qui combine la recherche sémantique dans une base vectorielle locale avec la capacité d'analyse d'un modèle de langage (LLM).
 
-## Getting started
+---
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## 2. Choix Technologiques
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Pour garantir la performance, la confidentialité et l'intégration académique, nous avons privilégié des technologies légères et open source :
 
-## Add your files
+*   **Base de données vectorielle : ChromaDB**
+    *   *Pourquoi :* Contrairement à Pinecone ou Milvus qui nécessitent une infrastructure cloud lourde, ChromaDB s'exécute localement dans un simple dossier (`veritas_vectordb`). C'est idéal pour un projet de cette taille.
+*   **Modèle d'Embedding (Vectorisation) : `paraphrase-multilingual-MiniLM-L12-v2`**
+    *   *Pourquoi :* Au lieu d'utiliser l'API payante d'OpenAI pour vectoriser le texte, nous utilisons ce modèle SentenceTransformers. Il est gratuit, tourne localement sur le processeur (CPU), et gère très bien le français et l'anglais.
+*   **Intelligence Artificielle (LLM) : Mistral Small (via RAGaRenn)**
+    *   *Pourquoi :* L'utilisation de l'infrastructure académique RAGaRenn (basée sur l'API compatible OpenAI) est gratuite et permet d'interroger un modèle français performant (Mistral) tout en garantissant la confidentialité des données.
+*   **Backend / Serveur : Python + FastAPI (à venir)**
+    *   *Pourquoi :* Python est incontournable pour manipuler des données et de l'IA (Pandas, ChromaDB). FastAPI permet d'envelopper cette logique dans un serveur web rapide et léger pour communiquer avec l'extension.
+*   **Frontend : Extension Web**
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+---
 
+## 3. Fonctionnement des Composants
+
+Le système est divisé en deux grandes phases : l'ingestion (asynchrone) et l'analyse (en temps réel).
+
+### A. Récupération des données (Le Script d'Ingestion)
+Un script récupère des données de sources fiables :
+1.  **Global Fact-Check :** Démentis récents via l'API Google FactCheck (AFP, Le Monde, Reuters).
+2.  **Wikidata :** Faits structurés et absolus via des requêtes SPARQL.
+3.  **OpenData (data.gouv.fr) :** Métadonnées officielles de l'État français.
+4.  **Dataset LIAR :** Un corpus massif historique de fake news politiques.
+Le texte extrait est haché en **MD5** (pour éviter les doublons), transformé en vecteurs mathématiques (Embeddings), puis sauvegardé dans ChromaDB.
+
+### B. Le Moteur d'Analyse (Le RAG)
+Lorsqu'un texte est soumis au backend, le système transforme la phrase suspecte en vecteur et calcule la **Distance de similarité (L2)** avec les 12 000 documents de ChromaDB. Il extrait le Top 3 des preuves les plus pertinentes mathématiquement.
+
+### C. L'Appel LLM
+Le backend assemble un prompt strict contenant les preuves récupérées par le RAG et le texte de l'utilisateur. Il demande au modèle Mistral d'analyser le texte *exclusivement* à l'une de ces preuves. Le LLM est contraint de répondre sous un format JSON strict (Score, Booléen, Explication, Citation).
+
+### D. L'Extension Firefox et la Machine Virtuelle (VM)
+*   **La Machine Virtuelle (Serveur) :** Le backend Python (FastAPI) et le dossier ChromaDB tourneront en permanence sur une VM de l'université. Elle expose une API.
+*   **L'Extension :** 
+---
+
+## 4. Diagrammes UML
+### 4.1 Diagramme de cas d'Utilisation
+
+```mermaid
+graph LR
+    U((Utilisateur))
+    A((Admin))
+    subgraph VeritasWeb
+        UC1([Lire une page web])
+        UC2([Demander l'analyse])
+        UC3([Voir le surlignage])
+        UC4([Mettre a jour la base])
+    end
+    U --> UC1
+    U --> UC2
+    U --> UC3
+    A --> UC4
 ```
-cd existing_repo
-git remote add origin https://gitlab2.istic.univ-rennes1.fr/achevallier2/fakenewsprojet.git
-git branch -M main
-git push -uf origin main
+
+### 4.2 Diagramme de Séquence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Utilisateur
+    participant Ext as Extension Firefox
+    participant API as Backend (FastAPI / VM)
+    participant DB as ChromaDB
+    participant LLM as LLM RAGaRenn
+
+    U->>Ext: Clic sur "Vérifier cette page"
+    Ext->>Ext: Extraction du texte du DOM
+    Ext->>API: POST /analyze {texte}
+    API->>DB: Requête de similarité (Embedding)
+    DB-->>API: Retourne le Top 3 des preuves (Contexte)
+    API->>LLM: Envoi du Prompt (Texte + Preuves RAG)
+    LLM-->>API: Retourne l'analyse au format JSON
+    API-->>Ext: Renvoie le JSON final
+    Ext->>Ext: Modification du DOM (Surlignage + Tooltip)
+    Ext-->>U: Affichage des résultats en rouge
 ```
 
-## Integrate with your tools
+### 4.3 Diagramme d'Architecture
 
-* [Set up project integrations](https://gitlab2.istic.univ-rennes1.fr/achevallier2/fakenewsprojet/-/settings/integrations)
+```mermaid
+graph TD
+    subgraph "Client (Navigateur Local)"
+        Ext["Extension Firefox<br>(JS / CSS / HTML)"]
+    end
 
-## Collaborate with your team
+    subgraph "Machine Virtuelle (Serveur VeritasWeb)"
+        API["Serveur Backend<br>(FastAPI - Python)"]
+        DB[("Base de données<br>ChromaDB")]
+    end
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+    subgraph "Services Tiers & APIs"
+        LLM["API RAGaRenn<br>(Modèle Mistral)"]
+        Sources[("Sources de vérité<br>(AFP, Wikidata, OpenData)")]
+    end
 
-## Test and Deploy
+    Ext <-->|"Requêtes HTTP (JSON)"| API
+    API <-->|"Recherche sémantique"| DB
+    API <-->|"Protocole OpenAI"| LLM
+    Sources -.->|"Script d'Ingestion régulier"| DB
+```
 
-Use the built-in continuous integration in GitLab.
+## 5. Guide d'Installation et d'Exécution
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+Ce guide détaille les étapes nécessaires pour cloner, configurer et exécuter le projet VeritasWeb sur une machine locale.
 
-***
+### 5.1. Prérequis
+- **Python 3.10 ou supérieur** installé sur votre machine.
+- **Git** pour cloner le dépôt.
 
-# Editing this README
+### 5.2. Installation des dépendances
+Ouvrez un terminal dans le dossier racine du projet et installez les bibliothèques requises :
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+    pip install -r requirements.txt
 
-## Suggestions for a good README
+### 5.3. Configuration de l'environnement
+Pour des raisons de sécurité, les clés API du LLM ne sont pas stockées sur Git. Vous devez configurer votre environnement local :
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+1. Copiez le fichier d'exemple fourni :
 
-## Name
-Choose a self-explaining name for your project.
+    cp .env.example .env
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+2. Éditez le fichier `.env` avec vos identifiants RAGaRenn :
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+RAGARENN_API_URL=https://ragarenn.eskemm-numerique.fr/sso/ch@t/api/chat/completions
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+RAGARENN_API_KEY=votre_cle_api_secrete_ici
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+RAGARENN_MODEL=ilaas/mistral-small-4-119b
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### 5.4. Initialisation : Construire la base vectorielle
+**Cette étape est obligatoire au premier lancement** pour créer le dossier `veritas_vectordb` qui servira de cerveau au RAG.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Lancez le script d'orchestration :
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+    python 1_construire_base.py
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+*Note : Le script télécharge également le dataset LIAR. L'encodage des 12 000 documents prendra quelques minutes.*
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### 5.5. Test : Lancer le moteur d'analyse
+Une fois la base vectorielle remplie, vous pouvez tester le pipeline d'analyse complet (RAG + LLM) via le terminal :
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+    python 2_analyser_page.py
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### 5.6. Lancement du Serveur Backend (FastAPI)
+*(Cette section sera mise à jour une fois le serveur finalisé)*
